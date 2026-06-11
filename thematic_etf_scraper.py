@@ -2,11 +2,18 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 """
-thematic_etfs_top1.csv 재생성
-- 테마별 AUM 1위 ETF 선정 후 yfinance 실제 수신 가능 여부 검증
-- 실패 시 동일 테마 2위, 3위로 자동 fallback
-- 끝자리 F 티커(OTC 비상장) 제외
-- 목표: 최소 MIN_VALID개 유효 티커 확보
+미국 상장 테마 ETF 리스트 수집기
+=================================
+소스: financedatabase (pip install financedatabase)
+출력: etf_analysis/thematic_etfs.csv          ← 전체 테마 ETF
+      etf_analysis/thematic_etf_summary.csv   ← 테마별 집계
+      etf_analysis/thematic_etfs_top1.csv     ← 테마별 대표 ETF (AUM 최대 1개)
+
+필터 조건:
+  1. 미국 거래소 상장 ETF만
+  2. 레버리지/인버스 ETF 제외
+  3. 명시적 비미국 단일국가/지역 집중 ETF 제외 (name 기준)
+  4. 제외 테마 네거티브 필터 (EXCLUDE_THEMES)
 """
 
 import financedatabase as fd
@@ -15,9 +22,9 @@ import yfinance as yf
 import warnings
 warnings.filterwarnings('ignore')
 
-MIN_VALID = 40
-FALLBACK_N = 5
-
+# ─────────────────────────────────────────────
+# 설정
+# ─────────────────────────────────────────────
 US_EXCHANGES = {'NMS', 'NYQ', 'PCX', 'ASE', 'NGM', 'NCM', 'BTS', 'PNK'}
 
 LEV_KEYWORDS = [
@@ -26,6 +33,7 @@ LEV_KEYWORDS = [
     'bull 2', 'bull 3', 'bear 2', 'bear 3',
     'daily bear', 'daily bull',
 ]
+
 NONUS_NAME_KEYWORDS = [
     'china', 'chinese', 'japan', 'japanese', 'india', 'indian',
     'korea', 'europe', 'european', 'germany', 'german', 'france', 'french',
@@ -35,7 +43,13 @@ NONUS_NAME_KEYWORDS = [
     'acwi', 'eafe', 'msci world', 'ftse developed', 'international equity',
     'emerging market', 'developed market',
 ]
-EXCLUDE_THEMES = ['DeFi', 'ESG', 'Sustainable', 'Socially Responsible']
+
+EXCLUDE_THEMES = [
+    'DeFi',
+    'ESG',
+    'Sustainable',
+    'Socially Responsible',
+]
 
 THEME_KEYWORDS = {
     "AI":                    ["artificial intelligence", "ai-powered", "ai powered"],
@@ -67,6 +81,7 @@ THEME_KEYWORDS = {
     "Fintech":               ["fintech", "financial technology"],
     "Blockchain":            ["blockchain"],
     "Cryptocurrency":        ["cryptocurrency", "digital asset", "crypto"],
+    "DeFi":                  ["defi", "decentralized finance"],
     "Gaming":                ["gaming", "video game"],
     "Esports":               ["esports", "e-sports"],
     "Water":                 ["water purification", "water infrastructure", "water technology"],
@@ -77,6 +92,9 @@ THEME_KEYWORDS = {
     "Aging Population":      ["aging population", "longevity"],
     "Healthcare Innovation": ["healthcare innovation"],
     "Cannabis":              ["cannabis", "marijuana", "hemp"],
+    "ESG":                   ["esg"],
+    "Sustainable":           ["sustainable investing", "sustainability"],
+    "Socially Responsible":  ["socially responsible"],
     "E-Commerce":            ["e-commerce", "online retail"],
     "Consumer Trends":       ["consumer trends"],
     "Pet Care":              ["pet care"],
@@ -93,142 +111,154 @@ THEME_KEYWORDS = {
 def has_any(text, keywords):
     return any(kw in text for kw in keywords)
 
-def is_listable(sym: str) -> bool:
-    """끝자리 F = OTC 핑크시트 비상장 → 제외"""
-    return not sym.endswith('F')
-
-def is_valid_ticker(sym: str) -> bool:
-    """yfinance로 최근 5일 데이터가 실제로 수신되는지 확인"""
-    try:
-        df = yf.download(sym, period='5d', interval='1d',
-                         auto_adjust=True, progress=False)
-        return len(df) >= 2
-    except Exception:
-        return False
-
-# ── 1. DB 로드 & 필터 ──────────────────────────
+# ─────────────────────────────────────────────
+# 1. 데이터 로드
+# ─────────────────────────────────────────────
 print("Loading financedatabase ETFs...")
 etfs = fd.ETFs()
 all_etfs = etfs.select()
+print(f"  Total in DB : {len(all_etfs):,}")
+
 us_etfs = all_etfs[all_etfs['exchange'].isin(US_EXCHANGES)].copy()
+print(f"  US-listed   : {len(us_etfs):,}")
 
 summary_lower = us_etfs['summary'].fillna('').str.lower()
 name_lower    = us_etfs['name'].fillna('').str.lower()
 
+# ─────────────────────────────────────────────
+# 2. 레버리지/인버스 제외
+# ─────────────────────────────────────────────
 lev_mask = (
     summary_lower.apply(lambda x: has_any(x, LEV_KEYWORDS)) |
     name_lower.apply(lambda x: has_any(x, LEV_KEYWORDS)) |
     (us_etfs['category'] == 'Trading')
 )
-us_etfs = us_etfs[~lev_mask]
+us_etfs = us_etfs[~lev_mask].copy()
+print(f"  레버리지/인버스 제외 ({lev_mask.sum()}개) → {len(us_etfs):,}")
 
+# ─────────────────────────────────────────────
+# 3. 명시적 비미국 ETF 제외 (name 기준)
+# ─────────────────────────────────────────────
 name_lower = us_etfs['name'].fillna('').str.lower()
 nonus_mask = name_lower.apply(lambda x: has_any(x, NONUS_NAME_KEYWORDS))
 us_etfs = us_etfs[~nonus_mask].copy()
+print(f"  비미국 제외   ({nonus_mask.sum()}개) → {len(us_etfs):,}")
 
-# ── 2. 테마 키워드 매칭 ────────────────────────
+# ─────────────────────────────────────────────
+# 4. 테마 키워드 매칭
+# ─────────────────────────────────────────────
 summary_lower = us_etfs['summary'].fillna('').str.lower()
 name_lower    = us_etfs['name'].fillna('').str.lower()
 
 records = []
 for sym, row in us_etfs.iterrows():
-    s, n = summary_lower[sym], name_lower[sym]
-    matched = [t for t, kws in THEME_KEYWORDS.items()
-               if any(kw in s or kw in n for kw in kws)]
-    if matched:
+    s = summary_lower[sym]
+    n = name_lower[sym]
+    matched_themes = [
+        theme for theme, kws in THEME_KEYWORDS.items()
+        if any(kw in s or kw in n for kw in kws)
+    ]
+    if matched_themes:
         records.append({
-            'symbol': sym, 'name': row['name'],
-            'themes': ' | '.join(matched),
+            'symbol':   sym,
+            'name':     row['name'],
+            'themes':   ' | '.join(matched_themes),
             'category': row.get('category', ''),
-            'family': row.get('family', ''),
+            'family':   row.get('family', ''),
             'exchange': row.get('exchange', ''),
         })
 
 df = pd.DataFrame(records).drop_duplicates(subset='symbol')
+
+# ─────────────────────────────────────────────
+# 4-1. 제외 테마 네거티브 필터
+# ─────────────────────────────────────────────
 exclude_pattern = '|'.join(EXCLUDE_THEMES)
 df = df[~df['themes'].str.contains(exclude_pattern)]
+print(f"\n  테마 ETF 최종: {len(df):,}개")
 
-# ── F 티커 사전 제거 ───────────────────────────
-before = len(df)
-df = df[df['symbol'].apply(is_listable)]
-print(f"테마 ETF 후보: {len(df):,}개 (F 티커 {before - len(df)}개 제거)")
+# ─────────────────────────────────────────────
+# 5. 테마별 집계
+# ─────────────────────────────────────────────
+theme_counts = {}
+for t_str in df['themes']:
+    for t in t_str.split(' | '):
+        theme_counts[t] = theme_counts.get(t, 0) + 1
 
-# ── 3. AUM 조회 ───────────────────────────────
-print("AUM 조회 중...")
-tickers = df['symbol'].tolist()
+summary_df = pd.DataFrame(
+    sorted(theme_counts.items(), key=lambda x: -x[1]),
+    columns=['theme', 'etf_count']
+)
+print(f"\n{summary_df.to_string(index=False)}")
+
+# ─────────────────────────────────────────────
+# 6. 저장 (전체)
+# ─────────────────────────────────────────────
+df.to_csv('etf_analysis/thematic_etfs.csv', index=True, encoding='utf-8-sig')
+summary_df.to_csv('etf_analysis/thematic_etf_summary.csv', index=False, encoding='utf-8-sig')
+print("\n✓ etf_analysis/thematic_etfs.csv 저장 완료")
+print("✓ etf_analysis/thematic_etf_summary.csv 저장 완료")
+
+# ─────────────────────────────────────────────
+# 7. 테마별 대표 ETF 선정 (AUM 최대 1개)
+#    yfinance에서 totalAssets(=AUM) 조회 후 테마별 1위만 추출
+# ─────────────────────────────────────────────
+print("\n테마별 대표 ETF 선정 중 (AUM 기준)...")
+
+tickers = df.index.tolist()
 aum_map = {}
+
+# 배치 단위로 나눠서 조회 (안정성)
 BATCH = 50
 for i in range(0, len(tickers), BATCH):
-    for sym in tickers[i:i+BATCH]:
+    batch = tickers[i:i+BATCH]
+    for sym in batch:
         try:
-            aum_map[sym] = yf.Ticker(sym).info.get('totalAssets', None)
+            info = yf.Ticker(sym).info
+            aum  = info.get('totalAssets', None)
+            aum_map[sym] = aum
         except Exception:
             aum_map[sym] = None
-    print(f"  {min(i+BATCH, len(tickers))}/{len(tickers)}", end='\r')
+    print(f"  {min(i+BATCH, len(tickers))}/{len(tickers)} 완료", end='\r')
 
-df['aum'] = df['symbol'].map(aum_map)
+print()
 
-# ── 4. 테마별 후보 풀 생성 (AUM 내림차순, 최대 FALLBACK_N개) ──
+df['aum'] = df.index.map(aum_map)
+
+# 테마별로 explode → AUM 기준 1위 추출
 df_exp = df.copy()
 df_exp['theme_single'] = df_exp['themes'].str.split(' | ')
 df_exp = df_exp.explode('theme_single')
-df_exp = df_exp[~df_exp['theme_single'].isin(EXCLUDE_THEMES)]
-df_exp = df_exp.sort_values('aum', ascending=False, na_position='last')
 
-theme_candidates = (
+# EXCLUDE_THEMES는 이미 제거됐지만 explode 후 혹시 남은 것도 방어
+df_exp = df_exp[~df_exp['theme_single'].isin(EXCLUDE_THEMES)]
+
+top1 = (
     df_exp
+    .sort_values('aum', ascending=False, na_position='last')
     .groupby('theme_single', sort=False)
-    .head(FALLBACK_N)
+    .first()
+    .reset_index()
+    .rename(columns={'theme_single': 'theme'})
+    [['theme', 'symbol', 'name', 'aum', 'family', 'category']]
+    .sort_values('theme')
+)
+
+# 심볼 중복 제거 — 같은 ETF가 여러 테마에 뽑혔을 경우
+# AUM 높은 테마 기준으로 1개만 남김
+top1 = (
+    top1
+    .sort_values('aum', ascending=False, na_position='last')
+    .drop_duplicates(subset='symbol', keep='first')
+    .sort_values('theme')
     .reset_index(drop=True)
 )
 
-# ── 5. 테마별 유효 티커 검증 (fallback 포함) ──
-print("\n\n유효 티커 검증 중 (fallback 포함)...")
-results = []
-checked_valid = set()
-
-for theme, grp in theme_candidates.groupby('theme_single', sort=True):
-    selected = None
-    for _, row in grp.iterrows():
-        sym = row['symbol']
-        if not is_listable(sym):                          # F 티커 skip
-            print(f"  [{theme}] {sym} — 비상장(F) skip")
-            continue
-        if sym in checked_valid:
-            selected = row
-            break
-        print(f"  [{theme}] {sym} 검증 중...", end=' ')
-        if is_valid_ticker(sym):
-            print("✓")
-            checked_valid.add(sym)
-            selected = row
-            break
-        else:
-            print("✗ fallback")
-    if selected is not None:
-        results.append({
-            'theme':    theme,
-            'symbol':   selected['symbol'],
-            'name':     selected['name'],
-            'aum':      selected['aum'],
-            'family':   selected['family'],
-            'category': selected['category'],
-        })
-    else:
-        print(f"  [{theme}] 유효 티커 없음 — 제외")
-
-# ── 6. 결과 출력 & 저장 ───────────────────────
-top1 = pd.DataFrame(results).sort_values('theme').reset_index(drop=True)
-valid_count = len(top1)
-print(f"\n최종 유효 테마 ETF: {valid_count}개 (목표: {MIN_VALID}개)")
-if valid_count < MIN_VALID:
-    print(f"⚠️  {MIN_VALID - valid_count}개 부족 — FALLBACK_N을 늘리거나 THEME_KEYWORDS 확장 필요")
-else:
-    print("✓ 목표 달성")
-
+print(f"\n테마별 대표 ETF ({len(top1)}개):")
+pd.set_option('display.max_columns', None)
 pd.set_option('display.max_colwidth', 40)
 pd.set_option('display.width', 120)
-print(top1[['theme', 'symbol', 'name', 'aum']].to_string(index=False))
+print(top1.to_string(index=False))
 
 top1.to_csv('etf_analysis/thematic_etfs_top1.csv', index=False, encoding='utf-8-sig')
 print("\n✓ etf_analysis/thematic_etfs_top1.csv 저장 완료")
