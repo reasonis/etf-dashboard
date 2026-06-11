@@ -156,7 +156,9 @@ const baseLayout = {
   xaxis: { gridcolor: '#1e2030', showgrid: true },
   yaxis: { gridcolor: '#1e2030', showgrid: true },
 };
-const cfg = { displayModeBar: false, responsive: true };
+const cfg = { displayModeBar: false, responsive: true, staticPlot: false,
+               scrollZoom: false, doubleClick: false,
+               modeBarButtonsToRemove: ['zoom2d','pan2d','zoomIn2d','zoomOut2d','autoScale2d','resetScale2d'] };
 
 function renderBar(divId, data) {
   const isMobile = window.innerWidth <= 768;
