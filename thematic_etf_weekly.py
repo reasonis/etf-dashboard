@@ -15,6 +15,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 import yfinance as yf
 import pandas as pd
 import json
+import math
+import time
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -22,15 +24,15 @@ warnings.filterwarnings('ignore')
 # 설정
 # ─────────────────────────────────────────────
 TOP_N       = 10
-DAILY_DAYS  = '3mo'   # 일봉 기간
-WEEKLY_DAYS = '1y'    # 주봉 기간
+DAILY_DAYS  = '3mo'
+WEEKLY_DAYS = '1y'
 
 # ─────────────────────────────────────────────
 # 1. 티커 리스트 로드
 # ─────────────────────────────────────────────
 df = pd.read_csv('etf_analysis/thematic_etfs_top1.csv')
-tickers  = df['symbol'].tolist()
-name_map = df.set_index('symbol')['name'].to_dict()
+tickers   = df['symbol'].tolist()
+name_map  = df.set_index('symbol')['name'].to_dict()
 theme_map = df.set_index('symbol')['theme'].to_dict()
 print(f"총 {len(tickers)}개 티커 로드")
 
@@ -38,7 +40,6 @@ print(f"총 {len(tickers)}개 티커 로드")
 # 2. 주간 수익률 계산 (티커별 개별 다운로드)
 # ─────────────────────────────────────────────
 print("주간 수익률 다운로드 중...")
-import time
 
 ret_map   = {}
 date_from = None
@@ -46,13 +47,14 @@ date_to   = None
 
 for i, sym in enumerate(tickers):
     print(f"  [{i+1}/{len(tickers)}] {sym}", end='\r')
-    for attempt in range(3):   # 실패 시 최대 3회 재시도
+    for attempt in range(3):
         try:
             hist = yf.Ticker(sym).history(period='5d', interval='1d', auto_adjust=True)
             if hist is None or len(hist) < 2:
                 break
             ret = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
-            ret_map[sym] = round(float(ret), 2)
+            if not math.isnan(float(ret)):
+                ret_map[sym] = round(float(ret), 2)
             if date_from is None:
                 date_from = hist.index[0].strftime('%Y-%m-%d')
                 date_to   = hist.index[-1].strftime('%Y-%m-%d')
@@ -63,17 +65,13 @@ for i, sym in enumerate(tickers):
 weekly_ret = pd.Series(ret_map).sort_values()
 print(f"\n  {date_from} ~ {date_to}, {len(weekly_ret)}개 수익률 계산 완료")
 
-# NaN 제거 후 Top/Bottom 추출
-weekly_ret = weekly_ret.dropna()
 winners = weekly_ret.nlargest(TOP_N).sort_values()
 losers  = weekly_ret.nsmallest(TOP_N).sort_values(ascending=False)
 
 # ─────────────────────────────────────────────
-# 3. 팝업용 상세 데이터 수집
-#    - 일봉 / 주봉 가격
-#    - 보유 종목 Top 10
+# 3. 팝업용 상세 데이터 수집 (winners + losers 전체)
 # ─────────────────────────────────────────────
-all_syms = list(set(winners.index.tolist() + losers.index.tolist()))
+all_syms = list(dict.fromkeys(winners.index.tolist() + losers.index.tolist()))
 detail   = {}
 
 print(f"상세 데이터 수집 중 ({len(all_syms)}개)...")
@@ -115,20 +113,21 @@ for i, sym in enumerate(all_syms):
         # 기본 정보
         info = t.info
         detail[sym] = {
-            'name':        name_map.get(sym, sym),
-            'theme':       theme_map.get(sym, ''),
-            'aum':         info.get('totalAssets'),
-            'expense':     info.get('annualReportExpenseRatio'),
-            'weekly_ret':  round(float(weekly_ret.get(sym, 0)), 2),
-            'daily':       daily_data,
-            'weekly':      weekly_data,
-            'holdings':    holdings,
+            'name':       name_map.get(sym, sym),
+            'theme':      theme_map.get(sym, ''),
+            'aum':        info.get('totalAssets'),
+            'expense':    info.get('annualReportExpenseRatio'),
+            'weekly_ret': ret_map.get(sym, 0),
+            'daily':      daily_data,
+            'weekly':     weekly_data,
+            'holdings':   holdings,
         }
     except Exception as e:
         print(f"\n  ⚠ {sym} 실패: {e}")
         detail[sym] = {
-            'name': name_map.get(sym, sym), 'theme': theme_map.get(sym, ''),
-            'weekly_ret': round(float(weekly_ret.get(sym, 0)), 2),
+            'name':       name_map.get(sym, sym),
+            'theme':      theme_map.get(sym, ''),
+            'weekly_ret': ret_map.get(sym, 0),
             'daily': {}, 'weekly': {}, 'holdings': [],
         }
 
@@ -151,11 +150,22 @@ payload = {
     'detail':     detail,
 }
 
+# None은 null로, NaN/Inf는 0으로 변환
+def sanitize(obj):
+    if isinstance(obj, dict):
+        return {k: sanitize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize(v) for v in obj]
+    elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return 0
+    return obj
+
+payload = sanitize(payload)
+data_json = json.dumps(payload, ensure_ascii=False)
+
 # ─────────────────────────────────────────────
 # 5. index.html 생성 (데이터 embed)
 # ─────────────────────────────────────────────
-data_json = json.dumps(payload, ensure_ascii=False, allow_nan=False)
-
 html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -177,7 +187,6 @@ html = f"""<!DOCTYPE html>
   .chart-box h2.winner {{ color: #00c48c; }}
   .chart-box h2.loser  {{ color: #ff4d6d; }}
 
-  /* ── 팝업 오버레이 ── */
   .overlay {{
     display: none; position: fixed; inset: 0;
     background: rgba(0,0,0,.65); z-index: 100;
@@ -207,7 +216,6 @@ html = f"""<!DOCTYPE html>
   }}
   .close-btn:hover {{ color: #fff; }}
 
-  /* 탭 */
   .tabs {{ display: flex; gap: 4px; padding: 12px 22px 0; border-bottom: 1px solid #2a2d3a; }}
   .tab {{
     padding: 7px 18px; border-radius: 6px 6px 0 0; font-size: 0.85rem;
@@ -218,7 +226,6 @@ html = f"""<!DOCTYPE html>
   .tab-content {{ display: none; flex: 1; overflow-y: auto; padding: 16px 22px; }}
   .tab-content.active {{ display: block; }}
 
-  /* 보유 종목 테이블 */
   .holdings-table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
   .holdings-table th {{
     text-align: left; color: #888; font-weight: 500;
@@ -232,7 +239,6 @@ html = f"""<!DOCTYPE html>
   }}
   .no-data {{ color: #555; font-size: 0.85rem; padding: 20px 0; }}
 
-  /* 메타 칩 */
   .chips {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }}
   .chip {{
     background: #23263a; border-radius: 6px; padding: 4px 10px;
@@ -259,7 +265,6 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
-<!-- 팝업 -->
 <div class="overlay" id="overlay" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-header">
@@ -302,14 +307,12 @@ html = f"""<!DOCTYPE html>
 </div>
 
 <script>
-// ── 임베드 데이터 ──────────────────────────────────────────
 const DATA = {data_json};
 let currentSym  = null;
 let currentMode = 'daily';
 
 document.getElementById('dateRange').textContent = DATA.date_range;
 
-// ── 공통 Plotly 레이아웃 ───────────────────────────────────
 const baseLayout = {{
   paper_bgcolor: 'transparent', plot_bgcolor: '#0f1117',
   margin: {{ t: 4, b: 36, l: 60, r: 16 }},
@@ -319,8 +322,7 @@ const baseLayout = {{
 }};
 const cfg = {{ displayModeBar: false, responsive: true }};
 
-// ── Bar Chart 렌더 ─────────────────────────────────────────
-function renderBar(divId, data, color) {{
+function renderBar(divId, data) {{
   const labels = data.symbols.map((s, i) => {{
     const n = data.names[i] || s;
     const short = n.length > 30 ? n.slice(0, 30) + '…' : n;
@@ -337,7 +339,7 @@ function renderBar(divId, data, color) {{
     customdata: data.symbols,
   }}], {{
     ...baseLayout,
-    height: {TOP_N} * 34 + 60,
+    height: {TOP_N} * 44 + 60,
     xaxis: {{ ...baseLayout.xaxis, ticksuffix: '%' }},
     yaxis: {{ ...baseLayout.yaxis, automargin: true }},
   }}, cfg);
@@ -347,10 +349,9 @@ function renderBar(divId, data, color) {{
   }});
 }}
 
-renderBar('chartWinner', DATA.winners, '#00c48c');
-renderBar('chartLoser',  DATA.losers,  '#ff4d6d');
+renderBar('chartWinner', DATA.winners);
+renderBar('chartLoser',  DATA.losers);
 
-// ── 팝업 열기 ──────────────────────────────────────────────
 function openModal(sym) {{
   currentSym  = sym;
   currentMode = 'daily';
@@ -363,7 +364,7 @@ function openModal(sym) {{
   document.getElementById('popAum').textContent     =
     d.aum ? '$' + (d.aum / 1e9).toFixed(1) + 'B' : '-';
   document.getElementById('popExpense').textContent =
-    d.expense != null ? (d.expense * 100).toFixed(2) + '%' : '-';
+    d.expense ? (d.expense * 100).toFixed(2) + '%' : '-';
 
   const retEl = document.getElementById('popRet');
   retEl.textContent = (d.weekly_ret >= 0 ? '+' : '') + d.weekly_ret + '%';
@@ -379,7 +380,6 @@ function closeModal(e) {{
     document.getElementById('overlay').classList.remove('open');
 }}
 
-// ── 탭 전환 ────────────────────────────────────────────────
 function switchTab(idx) {{
   document.querySelectorAll('.tab').forEach((t, i) =>
     t.classList.toggle('active', i === idx));
@@ -388,19 +388,17 @@ function switchTab(idx) {{
   if (idx === 1) renderHoldings();
 }}
 
-// ── 가격 차트 ──────────────────────────────────────────────
 function renderChart(mode) {{
   currentMode = mode;
-  const d    = DATA.detail[currentSym];
-  const src  = mode === 'daily' ? d.daily : d.weekly;
+  const d   = DATA.detail[currentSym];
+  const src = mode === 'daily' ? d.daily : d.weekly;
 
-  // 버튼 스타일
   ['Daily','Weekly'].forEach(m => {{
     const btn = document.getElementById('btn' + m);
     const on  = (m.toLowerCase() === mode);
-    btn.style.background   = on ? '#3a6fff' : 'none';
-    btn.style.color        = on ? '#fff'    : '#aaa';
-    btn.style.borderColor  = on ? '#3a6fff' : '#444';
+    btn.style.background  = on ? '#3a6fff' : 'none';
+    btn.style.color       = on ? '#fff'    : '#aaa';
+    btn.style.borderColor = on ? '#3a6fff' : '#444';
   }});
 
   if (!src || !src.dates || src.dates.length === 0) {{
@@ -422,7 +420,6 @@ function renderChart(mode) {{
   }}, cfg);
 }}
 
-// ── 보유 종목 ──────────────────────────────────────────────
 function renderHoldings() {{
   const holdings = DATA.detail[currentSym]?.holdings || [];
   const wrap     = document.getElementById('holdingsWrap');
@@ -453,7 +450,6 @@ function renderHoldings() {{
     </table>`;
 }}
 
-// ESC 키로 닫기
 document.addEventListener('keydown', e => {{
   if (e.key === 'Escape') document.getElementById('overlay').classList.remove('open');
 }});
