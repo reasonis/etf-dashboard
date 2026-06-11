@@ -49,15 +49,20 @@ for i, sym in enumerate(tickers):
     print(f"  [{i+1}/{len(tickers)}] {sym}", end='\r')
     for attempt in range(3):
         try:
-            hist = yf.Ticker(sym).history(period='5d', interval='1d', auto_adjust=True)
+            hist = yf.Ticker(sym).history(period='1mo', interval='1d', auto_adjust=True)
             if hist is None or len(hist) < 2:
                 break
-            ret = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
+            hist = hist.dropna(subset=['Close'])
+            if len(hist) < 2:
+                break
+            # 최근 5 거래일 기준 수익률 계산
+            hist_week = hist.tail(5)
+            ret = (hist_week['Close'].iloc[-1] / hist_week['Close'].iloc[0] - 1) * 100
             if not math.isnan(float(ret)):
                 ret_map[sym] = round(float(ret), 2)
             if date_from is None:
-                date_from = hist.index[0].strftime('%Y-%m-%d')
-                date_to   = hist.index[-1].strftime('%Y-%m-%d')
+                date_from = hist_week.index[0].strftime('%Y-%m-%d')
+                date_to   = hist_week.index[-1].strftime('%Y-%m-%d')
             break
         except Exception:
             time.sleep(1)

@@ -51,6 +51,13 @@ EXCLUDE_THEMES = [
     'Socially Responsible',
 ]
 
+# 섹터 ETF 제외 — name에 'Select Sector' 포함된 광범위 섹터 ETF
+SECTOR_ETF_KEYWORDS = [
+    'select sector',
+    'sector spdr',
+    'ucits',
+]
+
 THEME_KEYWORDS = {
     "AI":                    ["artificial intelligence", "ai-powered", "ai powered"],
     "Machine Learning":      ["machine learning"],
@@ -143,6 +150,14 @@ name_lower = us_etfs['name'].fillna('').str.lower()
 nonus_mask = name_lower.apply(lambda x: has_any(x, NONUS_NAME_KEYWORDS))
 us_etfs = us_etfs[~nonus_mask].copy()
 print(f"  비미국 제외   ({nonus_mask.sum()}개) → {len(us_etfs):,}")
+
+# ─────────────────────────────────────────────
+# 3-1. 섹터 ETF 제외 (name 기준)
+# ─────────────────────────────────────────────
+name_lower = us_etfs['name'].fillna('').str.lower()
+sector_mask = name_lower.apply(lambda x: has_any(x, SECTOR_ETF_KEYWORDS))
+us_etfs = us_etfs[~sector_mask].copy()
+print(f"  섹터 ETF 제외  ({sector_mask.sum()}개) → {len(us_etfs):,}")
 
 # ─────────────────────────────────────────────
 # 4. 테마 키워드 매칭
