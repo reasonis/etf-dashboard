@@ -1,9 +1,9 @@
-name: Weekly ETF Dashboard Update
+name: ETF Dashboard Daily Update
 
 on:
   schedule:
     - cron: '0 21 * * *'   # 매일 오전 6시 KST (= 전날 21:00 UTC)
-  workflow_dispatch:        # 수동 실행 버튼도 활성화
+  workflow_dispatch:
 
 jobs:
   update:
@@ -22,13 +22,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run weekly update
-        run: python thematic_etf_weekly.py
+      - name: Run daily update (retry up to 3 times)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: python thematic_etf_weekly.py
 
       - name: Commit & push updated HTML
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add etf_analysis/index.html
-          git diff --cached --quiet || git commit -m "chore: weekly ETF dashboard update $(date +'%Y-%m-%d')"
+          git diff --cached --quiet || git commit -m "update: ETF dashboard $(date +'%Y-%m-%d')"
           git push
