@@ -332,9 +332,11 @@ const baseLayout = {{
 const cfg = {{ displayModeBar: false, responsive: true }};
 
 function renderBar(divId, data) {{
+  const isMobile = window.innerWidth <= 768;
+  const maxLen   = isMobile ? 14 : 30;
   const labels = data.symbols.map((s, i) => {{
     const n = data.names[i] || s;
-    const short = n.length > 30 ? n.slice(0, 30) + '…' : n;
+    const short = n.length > maxLen ? n.slice(0, maxLen) + '…' : n;
     return short + '  (' + s + ')';
   }});
 
