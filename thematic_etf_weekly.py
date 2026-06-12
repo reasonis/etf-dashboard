@@ -398,7 +398,7 @@ function renderBar(divId, data) {{
     customdata: data.symbols,
   }}], {{
     ...baseLayout,
-    height: {TOP_N} * 44 + 60,
+    height: {TOP_N} * 30 + 60,
     dragmode: false,
     xaxis: {{ ...baseLayout.xaxis, ticksuffix: '%' }},
     yaxis: {{ ...baseLayout.yaxis, automargin: true }},
