@@ -27,6 +27,22 @@ TOP_N       = 10
 DAILY_DAYS  = '3mo'
 WEEKLY_DAYS = '1y'
 
+SECTOR_TICKERS = ['SPY', 'XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLU', 'XLV', 'XLY', 'XLRE']
+SECTOR_NAMES = {
+    'SPY':  'S&P 500',
+    'XLB':  'Materials',
+    'XLC':  'Comm. Services',
+    'XLE':  'Energy',
+    'XLF':  'Financials',
+    'XLI':  'Industrials',
+    'XLK':  'Technology',
+    'XLP':  'Consumer Staples',
+    'XLU':  'Utilities',
+    'XLV':  'Health Care',
+    'XLY':  'Consumer Discr.',
+    'XLRE': 'Real Estate',
+}
+
 # ─────────────────────────────────────────────
 # 1. 티커 리스트 로드
 # ─────────────────────────────────────────────
@@ -85,6 +101,35 @@ winners_1d = ret_1d_series.nlargest(TOP_N).sort_values()
 losers_1d  = ret_1d_series.nsmallest(TOP_N).sort_values(ascending=False)
 winners_1w = ret_1w_series.nlargest(TOP_N).sort_values()
 losers_1w  = ret_1w_series.nsmallest(TOP_N).sort_values(ascending=False)
+
+# ─────────────────────────────────────────────
+# 2-1. 섹터 수익률 계산
+# ─────────────────────────────────────────────
+print("섹터 수익률 다운로드 중...")
+sector_1d = {}
+sector_1w = {}
+
+for sym in SECTOR_TICKERS:
+    for attempt in range(3):
+        try:
+            hist = yf.Ticker(sym).history(period='1mo', interval='1d', auto_adjust=True)
+            if hist is None or len(hist) < 2:
+                break
+            hist = hist.dropna(subset=['Close'])
+            if len(hist) < 2:
+                break
+            r1d = (hist['Close'].iloc[-1] / hist['Close'].iloc[-2] - 1) * 100
+            if not math.isnan(float(r1d)):
+                sector_1d[sym] = round(float(r1d), 2)
+            hist_week = hist.tail(5)
+            r1w = (hist_week['Close'].iloc[-1] / hist_week['Close'].iloc[0] - 1) * 100
+            if not math.isnan(float(r1w)):
+                sector_1w[sym] = round(float(r1w), 2)
+            break
+        except Exception:
+            time.sleep(1)
+
+print(f"  섹터 수익률 완료: {len(sector_1d)}개")
 
 # ─────────────────────────────────────────────
 # 3. 팝업용 상세 데이터 수집 (winners + losers 전체)
@@ -166,6 +211,14 @@ def make_bar_data(series):
         'returns': [round(float(v), 2) for v in series.values],
     }
 
+def make_sector_data(ret_map):
+    syms = list(ret_map.keys())
+    return {
+        'symbols': syms,
+        'names':   [SECTOR_NAMES.get(s, s) for s in syms],
+        'returns': [ret_map[s] for s in syms],
+    }
+
 payload = {
     'date_1d':    f'{date_1d_from} ~ {date_1d_to}',
     'date_1w':    f'{date_1w_from} ~ {date_1w_to}',
@@ -173,6 +226,8 @@ payload = {
     'losers_1d':  make_bar_data(losers_1d),
     'winners_1w': make_bar_data(winners_1w),
     'losers_1w':  make_bar_data(losers_1w),
+    'sector_1d':  make_sector_data(sector_1d),
+    'sector_1w':  make_sector_data(sector_1w),
     'detail':     detail,
 }
 
@@ -304,6 +359,15 @@ html = f"""<!DOCTYPE html>
   </div>
 </div>
 
+<div style="padding: 0 24px 20px;">
+  <div style="background:#16181f;border-radius:10px;padding:16px;">
+    <h2 style="font-size:0.95rem;font-weight:600;color:#a0aec0;margin-bottom:10px;">
+      🗂 Sector ETF Returns
+    </h2>
+    <div id="chartSector"></div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay" onclick="closeModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-header">
@@ -366,6 +430,33 @@ function switchPeriod(p) {{
   const l = p === '1D' ? DATA.losers_1d  : DATA.losers_1w;
   renderBar('chartWinner', w);
   renderBar('chartLoser',  l);
+  renderSector(p === '1D' ? DATA.sector_1d : DATA.sector_1w);
+}}
+
+function renderSector(data) {{
+  const sorted = data.symbols
+    .map((s, i) => ({{ sym: s, name: data.names[i], ret: data.returns[i] }}))
+    .sort((a, b) => a.ret - b.ret);
+
+  const labels  = sorted.map(d => d.name + '  (' + d.sym + ')');
+  const returns = sorted.map(d => d.ret);
+
+  Plotly.newPlot('chartSector', [{{
+    type: 'bar', orientation: 'h',
+    x: returns, y: labels,
+    marker: {{ color: returns.map(v => v >= 0 ? '#00c48c' : '#ff4d6d') }},
+    text: returns.map(v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%'),
+    textposition: 'inside',
+    insidetextanchor: 'middle',
+    textfont: {{ color: '#ffffff', size: 11 }},
+    hovertemplate: '<b>%{{y}}</b><br>%{{x:.2f}}%<extra></extra>',
+  }}], {{
+    ...baseLayout,
+    height: sorted.length * 30 + 60,
+    dragmode: false,
+    xaxis: {{ ...baseLayout.xaxis, ticksuffix: '%' }},
+    yaxis: {{ ...baseLayout.yaxis, automargin: true }},
+  }}, cfg);
 }}
 
 const baseLayout = {{
@@ -411,6 +502,7 @@ function renderBar(divId, data) {{
 
 renderBar('chartWinner', DATA.winners_1w);
 renderBar('chartLoser',  DATA.losers_1w);
+renderSector(DATA.sector_1w);
 
 function openModal(sym) {{
   currentSym  = sym;
