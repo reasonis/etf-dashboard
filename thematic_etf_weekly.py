@@ -331,41 +331,35 @@ const baseLayout = {{
 }};
 const cfg = {{ displayModeBar: false, responsive: true, scrollZoom: false }};
 
-function renderBar(divId, data) {
-  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+function renderBar(divId, data) {{
+  const isMobile = window.innerWidth <= 768;
   const maxLen   = isMobile ? 14 : 30;
-  const labels = data.symbols.map((s, i) => {
+  const labels = data.symbols.map((s, i) => {{
     const n = data.names[i] || s;
     const short = n.length > maxLen ? n.slice(0, maxLen) + '…' : n;
     return short + '  (' + s + ')';
-  });
+  }});
 
-  Plotly.newPlot(divId, [{
+  Plotly.newPlot(divId, [{{
     type: 'bar', orientation: 'h',
     x: data.returns, y: labels,
-    marker: { color: data.returns.map(v => v >= 0 ? '#00c48c' : '#ff4d6d') },
+    marker: {{ color: data.returns.map(v => v >= 0 ? '#00c48c' : '#ff4d6d') }},
     text: data.returns.map(v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%'),
-    textposition: 'inside',       
-    insidetextanchor: 'end',      
-    insidetextfont: {
-      color: '#ffffff',           
-      size: 11,
-      weight: 'bold'
-    },
-    hovertemplate: '<b>%{y}</b><br>%{x:.2f}%<extra></extra>',
+    textposition: 'outside',
+    hovertemplate: '<b>%{{y}}</b><br>%{{x:.2f}}%<extra></extra>',
     customdata: data.symbols,
-  }], {
+  }}], {{
     ...baseLayout,
-    height: {TOP_N} * 44 + 60,    
+    height: {TOP_N} * 44 + 60,
     dragmode: false,
-    xaxis: { ...baseLayout.xaxis, ticksuffix: '%' },
-    yaxis: { ...baseLayout.yaxis, automargin: true },
-  }, cfg);
+    xaxis: {{ ...baseLayout.xaxis, ticksuffix: '%' }},
+    yaxis: {{ ...baseLayout.yaxis, automargin: true }},
+  }}, cfg);
 
-  document.getElementById(divId).on('plotly_click', e => {
+  document.getElementById(divId).on('plotly_click', e => {{
     openModal(e.points[0].customdata);
-  });
-}
+  }});
+}}
 
 renderBar('chartWinner', DATA.winners);
 renderBar('chartLoser',  DATA.losers);
