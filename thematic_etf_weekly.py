@@ -252,7 +252,7 @@ html = f"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Thematic ETF Weekly Dashboard</title>
+<title>ETF Dashboard</title>
 <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -336,7 +336,7 @@ html = f"""<!DOCTYPE html>
 <body>
 
 <header>
-  <h1>📊 Thematic ETF Weekly Dashboard</h1>
+  <h1>📊 ETF Dashboard</h1>
   <span id="dateRange"></span>
   <div style="margin-top:10px;display:flex;gap:8px;">
     <button id="btn1D" onclick="switchPeriod('1D')"
@@ -348,23 +348,23 @@ html = f"""<!DOCTYPE html>
   </div>
 </header>
 
-<div class="charts-wrap">
-  <div class="chart-box">
-    <h2 class="winner">📈 Weekly Winners — Top {TOP_N}</h2>
-    <div id="chartWinner"></div>
-  </div>
-  <div class="chart-box">
-    <h2 class="loser">📉 Weekly Losers — Bottom {TOP_N}</h2>
-    <div id="chartLoser"></div>
-  </div>
-</div>
-
 <div style="padding: 0 24px 20px;">
   <div style="background:#16181f;border-radius:10px;padding:16px;">
     <h2 style="font-size:0.95rem;font-weight:600;color:#a0aec0;margin-bottom:10px;">
       🗂 Sector ETF Returns
     </h2>
     <div id="chartSector"></div>
+  </div>
+</div>
+
+<div class="charts-wrap">
+  <div class="chart-box">
+    <h2 class="winner">📈 Thematic ETF — Top {TOP_N}</h2>
+    <div id="chartWinner"></div>
+  </div>
+  <div class="chart-box">
+    <h2 class="loser">📉 Thematic ETF — Bottom {TOP_N}</h2>
+    <div id="chartLoser"></div>
   </div>
 </div>
 
