@@ -332,7 +332,6 @@ const baseLayout = {{
 const cfg = {{ displayModeBar: false, responsive: true, scrollZoom: false }};
 
 function renderBar(divId, data) {
-  // f-string 에러를 방지하기 위해 최신 미디어쿼리 매칭 방식으로 변경
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   const maxLen   = isMobile ? 14 : 30;
   const labels = data.symbols.map((s, i) => {
@@ -346,8 +345,6 @@ function renderBar(divId, data) {
     x: data.returns, y: labels,
     marker: { color: data.returns.map(v => v >= 0 ? '#00c48c' : '#ff4d6d') },
     text: data.returns.map(v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%'),
-    
-    // 막대 내부에 글자 겹치기
     textposition: 'inside',       
     insidetextanchor: 'end',      
     insidetextfont: {
@@ -355,7 +352,6 @@ function renderBar(divId, data) {
       size: 11,
       weight: 'bold'
     },
-
     hovertemplate: '<b>%{y}</b><br>%{x:.2f}%<extra></extra>',
     customdata: data.symbols,
   }], {
