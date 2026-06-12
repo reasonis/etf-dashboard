@@ -131,12 +131,17 @@ for sym in SECTOR_TICKERS:
 
 print(f"  섹터 수익률 완료: {len(sector_1d)}개")
 
+# 섹터 수익률을 공통 ret_1d/ret_1w에 병합 (detail 수집에 활용)
+ret_1d.update(sector_1d)
+ret_1w.update(sector_1w)
+
 # ─────────────────────────────────────────────
 # 3. 팝업용 상세 데이터 수집 (winners + losers 전체)
 # ─────────────────────────────────────────────
 all_syms = list(dict.fromkeys(
     winners_1d.index.tolist() + losers_1d.index.tolist() +
-    winners_1w.index.tolist() + losers_1w.index.tolist()
+    winners_1w.index.tolist() + losers_1w.index.tolist() +
+    SECTOR_TICKERS
 ))
 detail   = {}
 
@@ -450,6 +455,7 @@ function renderSector(data) {{
     insidetextanchor: 'middle',
     textfont: {{ color: '#ffffff', size: 11 }},
     hovertemplate: '<b>%{{y}}</b><br>%{{x:.2f}}%<extra></extra>',
+    customdata: sorted.map(d => d.sym),
   }}], {{
     ...baseLayout,
     height: sorted.length * 30 + 60,
@@ -457,6 +463,10 @@ function renderSector(data) {{
     xaxis: {{ ...baseLayout.xaxis, ticksuffix: '%' }},
     yaxis: {{ ...baseLayout.yaxis, automargin: true }},
   }}, cfg);
+
+  document.getElementById('chartSector').on('plotly_click', e => {{
+    openModal(e.points[0].customdata);
+  }});
 }}
 
 const baseLayout = {{
