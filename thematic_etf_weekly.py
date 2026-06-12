@@ -345,7 +345,9 @@ function renderBar(divId, data) {{
     x: data.returns, y: labels,
     marker: {{ color: data.returns.map(v => v >= 0 ? '#00c48c' : '#ff4d6d') }},
     text: data.returns.map(v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%'),
-    textposition: 'outside',
+    textposition: 'inside',
+    insidetextanchor: 'middle',
+    textfont: {{ color: '#ffffff', size: 11 }},
     hovertemplate: '<b>%{{y}}</b><br>%{{x:.2f}}%<extra></extra>',
     customdata: data.symbols,
   }}], {{
